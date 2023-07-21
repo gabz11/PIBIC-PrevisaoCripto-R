@@ -1,0 +1,1134 @@
+---
+title: "PIBIC - Testes de previsões"
+author: "Gabriel Antonio Gomes de Farias"
+output: html_notebook
+---
+
+```{r}
+# 1.1 - Inicialização 
+library(quantmod)
+library(forecast)
+library(fpp2)
+library(ggplot2)
+library(stats)
+library(timeSeries)
+library(nnfor)
+```
+
+```{r}
+#1.2 - Dados - Inicialização 
+
+# BASES
+# -----------------------------------------------------------------------------
+data_inicio_acoes = "2022-05-01"# 1 ano
+data_fim_acoes = "2023-05-01"
+
+data_inicio_crypto = "2022-11-01" # 6 Meses
+data_fim_crypto = "2023-05-01"
+
+data_inicio_tsm = "2022-01-01" # 1 anos e 5 meses
+data_fim_tsm = "2023-05-01"
+
+data_inicio_btc = "2021-05-01" # 2 anos 
+data_fim_btc = "2023-05-01"
+
+
+
+# AÇÔES:
+# *IBM (International Business Machines Corporation)
+getSymbols("IBM", from = data_inicio_acoes, to = data_fim_acoes)
+ibm <- data.frame(IBM)
+colnames(ibm) <- gsub("IBM", "", colnames(ibm))
+datas_ibm <- row.names(ibm)
+
+
+# *AMZN (AMAZON)
+getSymbols("AMZN", from = data_inicio_acoes , to = data_fim_acoes)
+amzn <- data.frame(AMZN)
+colnames(amzn) <- gsub("AMZN", "", colnames(amzn))
+datas_amzn <- row.names(amzn)
+
+ # *TSM (Taiwan Semiconductor Manufacturing) 
+getSymbols("TSM", from = data_inicio_tsm, to = data_fim_tsm)
+tsm <- data.frame(TSM)
+colnames(tsm) <- gsub("TSM", "", colnames(tsm))
+datas_tsm <- row.names(tsm)
+
+#//////////////////////////////////////////////////////////////////////////////
+# CRIPTOMOEDAS:
+# *BTC-USD (BITCOIN) Lançada em 2009
+getSymbols("BTC-USD", from = data_inicio_btc , to = data_fim_btc)
+btc <- data.frame(`BTC-USD`)
+colnames(btc) <- gsub("BTC", "", colnames(btc))
+colnames(btc) <- gsub(".USD", "", colnames(btc))
+datas_btc<- row.names(btc)
+
+# *XMR-USD (MONERO) Lançada em 2013
+getSymbols("XMR-USD", from = data_inicio_crypto, to = data_fim_crypto)
+xmr <- data.frame(`XMR-USD`)
+colnames(xmr) <- gsub("XMR", "", colnames(xmr))
+colnames(xmr) <- gsub(".USD", "", colnames(xmr))
+datas_xmr <- row.names(xmr)
+
+# *ETH-USD (ETHERUM) Lançada em 2015
+getSymbols("ETH-USD", from = data_inicio_crypto, to = data_fim_crypto)
+eth <- data.frame(`ETH-USD`)
+colnames(eth) <- gsub("ETH", "", colnames(eth))
+colnames(eth) <- gsub(".USD", "", colnames(eth))
+datas_eth<- row.names(eth)
+
+
+# -----------------------------------------------------------------------------
+
+# INDICES: 
+# 1 - ABERTURA (OPEN)
+# 2 - ALTA (HIGH)
+# 3 - BAIXA (LOW)
+# 4 - FECHAMENTO (CLOSE) 
+# 5 - VOLUME
+# 6 - AJUSTE(ADJUSTED)
+# O valor do se baseia no valor do dolar americano, no projeto
+# procuramos descobrir prever o valor de fechamento (Close), maior parte dos 
+# modelos é univariado utilizando apenas o valor de fechamento, no modelo
+# de regressão foi realizado testes com Abertura e Volume como váriaveis
+```
+
+
+
+```{r}
+# 1.3 Funções para analise e transformação de dados
+# FUNÇÕES DE RESIDUAL E DESEMPENHO
+# -----------------------------------------------------------------------------
+acuracia <- function(fcast, teste){
+  # Função que verifica a acurácia, requer a previsão fit (modelo encaixado) e a
+  # base de dados para verificar a acurácia de valores previstos
+  # sob a diferença do conjunto de teste
+  print(forecast::accuracy(fcast, teste))
+}
+residual <- function(fit){
+  # Função que obtem os residuais do modelo
+  checkresiduals(fit)
+}
+# -----------------------------------------------------------------------------
+
+# FUNÇÃO DE TRANSFORMAÇÃO DE DADOS
+# -----------------------------------------------------------------------------
+transformacao <- function(data, op){
+  # Transformação para normalizar um conjunto de dados univariados utilizando
+  # BoxCox.
+  
+  # BoxCox
+  if(op == 1){
+    abertura <- BoxCox(data[,1], BoxCox.lambda(data[,1]))
+    #alta <- BoxCox(data[,2], BoxCox.lambda(data[,2])) 
+    #baixa <- BoxCox(data[,3], BoxCox.lambda(data[,3]))
+    fechamento <- BoxCox(data[,4], BoxCox.lambda(data[,4]))
+    volume <- BoxCox(data[,5], BoxCox.lambda(data[,5]))
+    #ajuste <- BoxCox(data[,6], BoxCox.lambda(data[,6]))
+    
+    data[,1] <- abertura
+    #data[,2] <- alta
+    #data[,3] <- baixa
+    data[,4] <- fechamento
+    data[,5] <- volume
+    #data[,6] <- ajuste
+  }
+  return(data)
+}
+inversaBoxCox <- function(previsao, lambda_original){
+  # Função para reverter transformação BoxCox para a escala original.
+  
+  previsao <- InvBoxCox(previsao, lambda_original)
+  return(previsao)
+}
+func_bias <- function(oper){
+  # Ajustar o bias para mediana em caso de transformação matemática dependente 
+  # do modelo
+  tbias <- FALSE
+  if(oper != 0){
+  tbias <- TRUE
+  }
+  return(tbias)
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 2.1 Analise autocorrelação dos Dados
+# Autocorrelação e autocorrelação parcial / ACF / PACF
+# ACF das bases  indica pelo padrão que lidamos com uma forte tendência
+par(mfrow = c(2,3))
+acf(ibm[,4])
+acf(amzn[,4])
+acf(tsm[,4])
+acf(btc[,4])
+acf(xmr[,4])
+acf(eth[,4])
+par(mfrow = c(1,3))
+acf(ibm[,4])
+acf(amzn[,4])
+acf(tsm[,4])
+par(mfrow = c(1,3))
+acf(btc[,4])
+acf(xmr[,4])
+acf(eth[,4])
+```
+
+```{r}
+# 2.2 Histogramas 
+
+ibm_t <- transformacao(ibm, 1)
+amzn_t <- transformacao(amzn, 1)
+tsm_t <- transformacao(tsm, 1)
+btc_t <- transformacao(btc, 1)
+xmr_t <- transformacao(xmr, 1)
+eth_t <- transformacao(eth, 1)
+
+# Histogramas antes e após transformação BoxCox
+par(mfrow = c(1,2))
+
+hist(ibm[,4])
+hist(ibm_t[,4])
+
+hist(amzn[,4])
+hist(amzn_t[,4])
+
+hist(tsm[,4])
+hist(tsm_t[,4])
+
+hist(btc[,4])
+hist(btc_t[,4])
+
+hist(xmr[,4])
+hist(xmr_t[,4])
+
+hist(eth[,4])
+hist(eth_t[,4])
+```
+
+```{r}
+# 3 Elaboração dos modelos e previsões
+# Nas próximos blocos teremos funções referentes a cada modelo, o formato das 
+# funções recebe os seguintes argumentos:
+# data = dados da série temporal / tipo: df
+# legenda = legenda para plotagem da previsão / tipo: string
+# oper = argumento para aplicar transformação boxcox no conjunto 
+#   0: não aplica / 1: aplica
+# datas = as datas extraidas do conjunto de teste cujo serviram para comparar
+# os resultados previstos com os atuais conforme suas respectivas datas.
+
+# Os parametros do modelo divergem de cada modelo, mas de toda forma 
+# as funções seguem a seguinte sequência no geral:
+# > 1 Transformação de df em objeto ts, obtenção do tamanho de treino e teste
+# : 2 Aplicação de transformação BoxCox (Caso oper = 1)
+# > 3 Encaixe do modelo
+# > 4 Previsão do modelo
+# : 5 Transformação inversa da BoxCox para escala original dos valores previstos (Caso oper = 1)
+# > 6 Análise de residuais e cálculo de acurácia
+# > 7 Imprimir valores previstos, atuais e exibir conforme dado do conjunto de teste
+# > 8 Plotagem do modelo de previsão
+
+# Sendo que o passo 2 e o passo 5 só são aplicados caso seja optado a transformação
+# todo modelo segue essa sequencia no todo porém cada um tem seu próprio modo
+# de elaboração do modelo
+```
+
+
+```{r}
+# 3.1 Métodos de previsão simples - com base treino/teste e verificação de resi
+# duais.
+
+# MODELO BASICO
+metodo_basico_split <- function(data, legenda, oper, datas){
+
+  
+  # Criando um objeto ts com o conjunto de dados.
+  data <- ts(data)
+  
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_escala <- BoxCox.lambda(data[,4])
+  
+  # Aplicação da transformação de BoxCox conforme parametro
+  data <- transformacao(data, oper)
+  
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+  
+  fit_media <- meanf(treino[,4], h = horizonte, biasadj = tbias)
+  fit_ingenuo <- rwf(treino[,4], h = horizonte, biasadj = tbias)
+  fit_drift <- rwf(treino[,4], h = horizonte,drift = TRUE, biasadj = tbias)
+  
+  fcast_media <- forecast(fit_media, biasadj = tbias)
+  fcast_ingenuo <- forecast(fit_ingenuo, biasadj = tbias)
+  fcast_drift <- forecast(fit_drift, biasadj = tbias)
+  
+  # Inversa da BoxCox
+  if(oper == 1){
+    fcast_media[["mean"]] <- inversaBoxCox(fcast_media[["mean"]], lambda_escala)
+    fcast_ingenuo[["mean"]] <- inversaBoxCox(fcast_ingenuo[["mean"]], lambda_escala)
+    fcast_drift[["mean"]] <- inversaBoxCox(fcast_drift[["mean"]], lambda_escala)
+    data[,4] <- inversaBoxCox(data[,4], lambda_escala)
+  }
+
+  # verifica residuais do conjunto de treino
+  checkresiduals(fit_media)
+  checkresiduals(fit_ingenuo)
+  checkresiduals(fit_drift)
+  
+  # A acurácia dos valores previstos em relação a os atuais
+  acuracia(fcast_media[["mean"]], valores_originais)
+  acuracia(fcast_ingenuo[["mean"]], valores_originais)
+  acuracia(fcast_drift[["mean"]], valores_originais)
+  
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast_media[["mean"]], fcast_ingenuo[["mean"]], fcast_drift[["mean"]], valores_originais)
+  print( previsao_func_datas)
+  
+  
+  autoplot(data[,4], main = legenda)+
+    ylab("Fechamento em Dolar")+
+    autolayer(fcast_media, series = "Média", PI = FALSE)+
+    autolayer(fcast_ingenuo, series = "Ingenuo", PI = FALSE)+
+    autolayer(fcast_drift, series = "Drift", PI = FALSE)
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 3.2.1 Básico - IBM
+metodo_basico_split(ibm, "IBM", 0, datas_ibm)
+```
+
+```{r}
+# 3.2.2 Básico - IBM
+metodo_basico_split(ibm, "IBM", 1, datas_ibm)
+```
+
+```{r}
+# 3.3.1 Básico - AMAZON
+metodo_basico_split(amzn, "AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 3.3.2 Básico - AMAZON
+metodo_basico_split(amzn, "AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 3.4.1 Básico - TSM
+metodo_basico_split(tsm, "TSM", 0, datas_tsm)
+```
+
+```{r}
+# 3.4.2 Básico - TSM
+metodo_basico_split(tsm, "TSM", 1, datas_tsm)
+```
+
+```{r}
+# 3.5.1 Básico - BTC
+metodo_basico_split(btc, "BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 3.5.2 Básico - BTC
+metodo_basico_split(btc, "BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 3.6.1 Básico - XMR
+metodo_basico_split(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 3.6.2 Básico - XMR
+metodo_basico_split(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 3.7.1 Básico - ETH
+metodo_basico_split(eth, "ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 3.7.2 Básico - ETH
+metodo_basico_split(eth, "ETH-USD", 1, datas_eth)
+```
+
+```{r}
+# 4.1 Regressão Linear - Definição Função
+
+# FUNÇÕES
+# -----------------------------------------------------------------------------
+metodos_regressao <- function(data,legenda_ticker, oper, datas){
+  # Criando um objeto ts com o conjunto de dados.
+  data <- ts(data)
+  
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_close <- BoxCox.lambda(data[,4])
+  lambda_open <- BoxCox.lambda(data[,1])
+  lambda_volume <- BoxCox.lambda(data[,5])
+  
+  # Aplicação da transformação de BoxCox
+  data <- transformacao(data, oper)
+  
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+  
+  fit1<- tslm(.Close ~ .Open + .Volume + trend, data = treino, biasadj = tbias ) # Metodo linear com Abertura, volume e tendencia
+
+  newdata = data.frame(
+    .Close = rep(mean(treino[,4]), horizonte),
+    .Open = rep(mean(treino[,1]), horizonte),
+    .Volume = rep(mean(treino[,5]), horizonte)
+  )
+  
+  
+  fcast1 <- forecast(fit1, h = horizonte, newdata = newdata, biasadj = tbias)
+
+  # Inversa BoxCox 
+  if(oper == 1){
+    fcast1[["model"]][["model"]][[".Close"]]<- inversaBoxCox(fcast1[["model"]][["model"]][[".Close"]], lambda_close)
+    fcast1[["model"]][["model"]][[".Open"]] <- inversaBoxCox(fcast1[["model"]][["model"]][[".Open"]], lambda_open)
+    fcast1[["model"]][["model"]][[".Volume"]] <- inversaBoxCox(fcast1[["model"]][["model"]][[".Volume"]], lambda_volume)
+    
+    fcast1[["mean"]] <- inversaBoxCox(fcast1[["mean"]], lambda_close)
+
+    
+    data[,4] <- inversaBoxCox(data[,4], lambda_close)
+    data[,1] <- inversaBoxCox(data[,1], lambda_open)
+    data[,5] <- inversaBoxCox(data[,5], lambda_volume)
+  }
+  
+  summary(fcast1)
+  
+  residual(fit1)
+
+  acuracia(fcast1[["mean"]], valores_originais)
+
+  
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast1[["mean"]], valores_originais)
+  print(previsao_func_datas)
+  
+  autoplot(data[,4], main = legenda_ticker)+
+    ylab("Fechamento USD")+
+    autolayer(fcast1, PI = FALSE, series = "Abertura + Volume + Tendência")
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 4.2.1 - Métodos Regressão - IBM
+metodos_regressao(ibm, "IBM", 0, datas_ibm)
+```
+
+```{r}
+# 4.2.2 - Métodos Regressão - IBM
+metodos_regressao(ibm, "IBM", 1, datas_ibm)
+```
+
+```{r}
+# 4.3.1 - Métodos Regressão - AMZN
+metodos_regressao(amzn, "AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 4.3.2 - Métodos Regressão - AMZN
+metodos_regressao(amzn, "AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 4.4.1 - Métodos Regressão - TSM
+metodos_regressao(tsm, "TSM", 0, datas_tsm)
+```
+
+```{r}
+# 4.4.2 - Métodos Regressão - TSM
+metodos_regressao(tsm, "TSM", 1, datas_tsm)
+```
+
+```{r}
+# 4.5.1 - Métodos Regressão - BITCOIN
+metodos_regressao(btc,"BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 4.5.2 - Métodos Regressão - BITCOIN
+metodos_regressao(btc,"BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 4.6.1 - Métodos Regressão - XMR
+metodos_regressao(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 4.6.2 - Métodos Regressão - XMR
+metodos_regressao(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 4.7.1 - Métodos Regressão - ETHERUM
+metodos_regressao(eth, "ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 4.7.2 - Métodos Regressão - ETHERUM
+metodos_regressao(eth, "ETH-USD", 1, datas_eth)
+```
+
+```{r}
+# 5.1 Suavização Exponencial
+# FUNÇÕES
+# -----------------------------------------------------------------------------
+metodos_suavicazao <- function(data,legenda, oper, datas){
+  #
+  data <- ts(data)
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_escala <- BoxCox.lambda(data[,4])
+  
+  # Aplicação da transformação de BoxCox
+  data <- transformacao(data, oper)
+  
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+  #
+  
+  fit_ses <- ses(treino[,4], h = horizonte, biasadj = tbias)
+  fit_holt <- holt(treino[,4],h = horizonte, biasadj = tbias)
+  fit_ets <- ets(treino[,4], biasadj = tbias)
+
+  fcast_ses <- forecast(fit_ses, biasadj = tbias)
+  fcast_holt <- forecast(fit_holt, biasadj = tbias)
+  fcast_ets <- forecast(fit_ets, h = horizonte, biasadj = tbias)
+  
+  
+  
+  residual(fit_ses)
+  residual(fit_holt)
+  residual(fit_ets)
+  
+
+  
+  if(oper == 1){
+    fcast_ses[["mean"]] <- inversaBoxCox(fcast_ses[["mean"]], lambda_escala)
+    fcast_holt[["mean"]] <- inversaBoxCox(fcast_holt[["mean"]], lambda_escala)
+    fcast_ets[["mean"]] <- inversaBoxCox(fcast_ets[["mean"]], lambda_escala)
+    data[,4] <- inversaBoxCox(data[,4], lambda_escala)
+  }
+  #
+  
+  acuracia(fcast_ses[["mean"]], valores_originais)
+  acuracia(fcast_holt[["mean"]], valores_originais)
+  acuracia(fcast_ets[["mean"]], valores_originais)
+  
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast_ses[["mean"]], fcast_holt[["mean"]], fcast_ets[["mean"]], valores_originais)
+  print(previsao_func_datas)
+  
+  
+  
+  autoplot(data[,4], main = legenda)+
+   ylab("Fechamento em Dolar")+
+   autolayer(fcast_ses,PI = FALSE, series = "Simples")+
+   autolayer(fcast_holt,PI = FALSE, series = "Holt")+
+   autolayer(fcast_ets,PI = FALSE, series = "ETS(Modelo optimo)")
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 5.2.1 SUAVIZAÇÃO EXPONENCIAL - IBM
+metodos_suavicazao(ibm, "IBM", 0, datas_ibm)
+```
+
+```{r}
+# 5.2.2 SUAVIZAÇÃO EXPONENCIAL - IBM
+metodos_suavicazao(ibm, "IBM",1, datas_ibm)
+```
+
+```{r}
+# 5.3.1 SUAVIZAÇÃO EXPONENCIAL - AMZN
+metodos_suavicazao(amzn, "AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 5.3.2 SUAVIZAÇÃO EXPONENCIAL - AMZN
+metodos_suavicazao(amzn, "AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 5.4.1 SUAVIZAÇÃO EXPONENCIAL - TSM
+metodos_suavicazao(tsm, "TSM", 0, datas_tsm)
+```
+
+```{r}
+# 5.4.2 SUAVIZAÇÃO EXPONENCIAL - TSM
+metodos_suavicazao(tsm, "TSM", 1, datas_tsm)
+```
+
+```{r}
+# 5.5.1 SUAVIZAÇÃO EXPONENCIAL - BTC
+metodos_suavicazao(btc, "BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 5.5.2 SUAVIZAÇÃO EXPONENCIAL - BTC
+metodos_suavicazao(btc, "BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 5.6.1 SUAVIZAÇÃO EXPONENCIAL - XMR
+metodos_suavicazao(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 5.6.2 SUAVIZAÇÃO EXPONENCIAL - XMR
+metodos_suavicazao(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 5.7.1 SUAVIZAÇÃO EXPONENCIAL - ETH
+metodos_suavicazao(eth, "ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 5.7.2 SUAVIZAÇÃO EXPONENCIAL - ETH
+metodos_suavicazao(eth, "ETH-USD", 1, datas_eth)
+```
+
+
+```{r}
+# 6.1 Arima
+# FUNÇÕES
+# -----------------------------------------------------------------------------
+metodo_arima <- function(data, legenda, oper, datas){
+  data <- ts(data)
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_escala <- BoxCox.lambda(data[,4])
+  
+  # Aplicação da transformação de BoxCox
+  data <- transformacao(data, oper)
+  
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+
+  # 
+  
+  fit_arima <- auto.arima(treino[,4], seasonal = FALSE, biasadj = tbias, stepwise=FALSE, approximation=FALSE)
+
+  fcast_arima <- forecast(fit_arima, biasadj = tbias, h = horizonte)
+
+  # Op reversa de boxcox
+  if(oper == 1){
+    fcast_arima[["mean"]] <- inversaBoxCox(fcast_arima[["mean"]], lambda_escala)
+    fcast_arima[["lower"]] <- inversaBoxCox(fcast_arima[["lower"]], lambda_escala)
+    fcast_arima[["upper"]] <- inversaBoxCox(fcast_arima[["upper"]], lambda_escala)
+    data[,4] <- inversaBoxCox(data[,4], lambda_escala)
+  }
+  #
+  
+  residual(fit_arima)
+  acuracia(fcast_arima[["mean"]], valores_originais)
+  
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast_arima[["mean"]], valores_originais)
+  print(previsao_func_datas)
+  
+  autoplot(data[,4], main = legenda)+
+    ylab("Fechamento em Dolar")+
+    autolayer(fcast_arima[["mean"]], series="ARIMA")
+}
+# -----------------------------------------------------------------------------
+```
+
+
+
+```{r}
+# 6.2.1 - Arima - IBM
+metodo_arima(ibm, "IBM",0, datas_ibm)
+```
+
+```{r}
+# 6.2.2 - Arima - IBM
+metodo_arima(ibm, "IBM",1, datas_ibm)
+```
+
+```{r}
+# 6.3.1 - Arima - AMZN
+metodo_arima(amzn,"AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 6.3.2 - Arima - AMZN
+metodo_arima(amzn,"AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 6.4.1 - Arima - TSM
+metodo_arima(tsm,"TSM", 0, datas_tsm)
+```
+
+```{r}
+# 6.4.2 - Arima - TSM
+metodo_arima(tsm,"TSM", 1, datas_tsm)
+```
+
+```{r}
+# 6.5.1 - Arima - BTC
+metodo_arima(btc,"BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 6.5.2 - Arima - BTC
+metodo_arima(btc,"BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 6.6.1 - Arima - XMR
+metodo_arima(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 6.6.2 - Arima - XMR
+metodo_arima(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 6.7.1 - Arima - ETH
+metodo_arima(eth,"ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 6.7.2 - Arima - ETH
+metodo_arima(eth,"ETH-USD", 1, datas_eth)
+```
+
+```{r}
+# 7.1 - NNETAR
+# FUNÇÕES
+# -----------------------------------------------------------------------------
+metodo_nnetar <- function(data, legenda, oper, datas){
+  #
+  data <- ts(data)
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_escala <- BoxCox.lambda(data[,4])
+  
+  # Aplicação da transformação de BoxCox
+  data <- transformacao(data, oper)
+  
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+  #
+  
+  fit_nnetar <- nnetar(treino[,4], PI=TRUE)
+
+  
+  fcast_nnetar <- forecast(fit_nnetar, PI = TRUE, h = horizonte)
+  #
+  if(oper == 1){
+    fcast_nnetar[["mean"]] <- inversaBoxCox(fcast_nnetar[["mean"]], lambda_escala)
+    data[,4] <- inversaBoxCox(data[,4], lambda_escala)
+  }
+  #
+
+  
+  residual(fit_nnetar)
+  
+  acuracia(fcast_nnetar[["mean"]], valores_originais)
+  
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast_nnetar[["mean"]], valores_originais)
+  print(previsao_func_datas)
+  
+  autoplot(data[,4], main = legenda)+
+    ylab("Fechamento em Dolar")+
+    autolayer(fcast_nnetar[["mean"]], series = "NNETAR")
+  
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 7.2.1 - NNETAR - IBM
+metodo_nnetar(ibm,"IBM", 0, datas_ibm)
+```
+
+```{r}
+# 7.2.2 - NNETAR - IBM
+metodo_nnetar(ibm,"IBM", 1, datas_ibm)
+```
+
+```{r}
+# 7.3.1 - NNETAR - AMZN
+metodo_nnetar(amzn, "AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 7.3.2 - NNETAR - AMZN
+metodo_nnetar(amzn, "AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 7.4.1 - NNETAR - TSM
+metodo_nnetar(tsm, "TSM", 0, datas_tsm)
+```
+
+```{r}
+# 7.4.2 - NNETAR - TSM
+metodo_nnetar(tsm, "TSM", 1, datas_tsm)
+```
+
+```{r}
+# 7.5.1 - NNETAR - BTC
+metodo_nnetar(btc, "BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 7.5.2 - NNETAR - BTC
+metodo_nnetar(btc, "BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 7.6.1 - NNETAR - XMR
+metodo_nnetar(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 7.6.2 - NNETAR - XMR
+metodo_nnetar(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 7.7.1 NNETAR - ETH
+metodo_nnetar(eth, "ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 7.7.2 NNETAR - ETH
+metodo_nnetar(eth, "ETH-USD", 1, datas_eth)
+```
+
+```{r}
+# 8.1 - MLP - Inicialização
+# FUNÇÕES
+# -----------------------------------------------------------------------------
+metodo_mlp <- function(data, legenda, oper, datas){
+  data <- ts(data)
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_escala <- BoxCox.lambda(data[,4])
+  
+  # Aplicação da transformação de BoxCox
+  data <- transformacao(data, oper)
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+  #
+  # lags: total de nos de entrada
+  fit_mlp <- mlp(treino[,4], lags = 1)
+  
+  fcast_mlp <- forecast(fit_mlp, h = horizonte)
+  
+  if(oper == 1){
+    fcast_mlp[["mean"]] <- inversaBoxCox(fcast_mlp[["mean"]], lambda_escala)
+    data[,4] <- inversaBoxCox(data[,4], lambda_escala)
+  }
+  #
+
+  residual(fcast_mlp)
+
+  acuracia(fcast_mlp[["mean"]], valores_originais)
+
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast_mlp[["mean"]], valores_originais)
+  print(previsao_func_datas)
+  
+  plot(fit_mlp)
+
+  autoplot(data[,4], main = legenda) +
+    ylab("Fechamento em Dolar")+
+    autolayer(fcast_mlp[["mean"]], series = "MLP" ) 
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 8.2.1 - MLP - IBM
+metodo_mlp(ibm, "IBM", 0, datas_ibm)
+```
+
+```{r}
+# 8.2.2 - MLP - IBM
+metodo_mlp(ibm, "IBM", 1, datas_ibm)
+```
+
+```{r}
+# 8.3.1 - MLP - AMZN
+metodo_mlp(amzn, "AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 8.3.2 - MLP - AMZN
+metodo_mlp(amzn, "AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 8.4.1 - MLP - TSM
+metodo_mlp(tsm, "TSM", 0, datas_tsm)
+```
+
+```{r}
+# 8.4.2 - MLP - TSM
+metodo_mlp(tsm, "TSM", 1, datas_tsm)
+```
+
+```{r}
+# 8.5.1 - MLP - BTC
+metodo_mlp(btc, "BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 8.5.2 - MLP - BTC
+metodo_mlp(btc, "BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 8.6.1 - MLP - XMR
+metodo_mlp(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 8.6.2 - MLP - XMR
+metodo_mlp(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 8.7.1 - MLP - ETH
+metodo_mlp(eth, "ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 8.7.2 - MLP - ETH
+metodo_mlp(eth, "ETH-USD", 1, datas_eth)
+```
+
+```{r}
+# 9.1 - ELm (EXTREME LEARNING MACHINE) - Inicialização
+# FUNÇÕES
+# -----------------------------------------------------------------------------
+metodo_eml <- function(data, legenda, oper, datas){
+  data <- ts(data)
+  tam_total <- length(data[,4])
+  tam_treino <- floor(length(data[,4]) * 0.8)
+  tam_teste <- tam_total - tam_treino
+  
+  # Valores atuais de fechamento para serem comparados após geração de previsão
+  valores_originais <- window(data[,4], start = tam_treino + 1, end = tam_total)
+  
+  # Total de periodos (diário) a serem previstos corresponde ao tamanho da
+  # base de teste
+  horizonte <- tam_teste
+  
+  # Guardando o lambda para inverter transformação de BoxCox no final
+  lambda_escala <- BoxCox.lambda(data[,4])
+  
+  # Aplicação da transformação de BoxCox
+  data <- transformacao(data, oper)
+  # Separação em 80% de treino e 20% de teste 
+  treino <- window(data, end = tam_treino)
+  teste <- window(data, start = tam_treino + 1, end = tam_total)
+  
+  tbias <- func_bias(oper)
+  #
+  # lags: total de nos de entrada
+  
+
+  
+  # lags: total de nos de entrada
+  
+  # REGRESSÂO LINEAR
+  fit_elm_lm <- elm(data[,4], y = treino[,4], type = "lm", lags = 1)
+  # CUME COM CROSSVALIDAÇÃO
+  fit_elm_ridge <- elm(data[,4], y = treino[,4], type = "ridge", lags = 1)
+  
+  fcast_elm_lm <- forecast(fit_elm_lm, h = horizonte)
+  fcast_elm_ridge <- forecast(fit_elm_ridge, h = horizonte)
+  
+  residual(fcast_elm_lm)
+  residual(fcast_elm_ridge)
+  
+  if(oper == 1){
+    fcast_elm_lm[["mean"]] <- inversaBoxCox(fcast_elm_lm[["mean"]], lambda_escala)
+    fcast_elm_ridge[["mean"]] <- inversaBoxCox(fcast_elm_ridge[["mean"]], lambda_escala)
+    data[,4] <- inversaBoxCox(data[,4], lambda_escala)
+  }
+  
+
+  
+  acuracia(fcast_elm_lm[["mean"]], valores_originais)
+  acuracia(fcast_elm_ridge[["mean"]], valores_originais)
+  
+  # junta periodo de teste com os valores previstos e atuais
+  datas <- window(datas, start = tam_treino + 1, end = tam_total)
+  previsao_func_datas <- data.frame(datas, fcast_elm_lm[["mean"]], fcast_elm_ridge[["mean"]], valores_originais)
+  print(previsao_func_datas)
+  
+  plot(fit_elm_lm)
+  plot(fit_elm_ridge)
+  
+  autoplot(data[,4])+
+    ylab("Fechamento em Dolar")+
+    autolayer(fcast_elm_lm, series = "ELM (Regressão Linear)")+
+    autolayer(fcast_elm_ridge, series = "ELM (Cume com CV)")
+}
+# -----------------------------------------------------------------------------
+```
+
+```{r}
+# 9.2.1 - EML (EXTREME LEARNING MACHINE) - IBM
+metodo_eml(ibm, "IBM", 0, datas_ibm)
+```
+
+```{r}
+# 9.2.2 - EML (EXTREME LEARNING MACHINE) - IBM
+metodo_eml(ibm, "IBM", 1, datas_ibm)
+```
+
+```{r}
+# 9.3.1 - EML (EXTREME LEARNING MACHINE) - AMZN
+metodo_eml(amzn, "AMZN", 0, datas_amzn)
+```
+
+```{r}
+# 9.3.2 - EML (EXTREME LEARNING MACHINE) - AMZN
+metodo_eml(amzn, "AMZN", 1, datas_amzn)
+```
+
+```{r}
+# 9.4.1 - EML (EXTREME LEARNING MACHINE) - TSM
+metodo_eml(tsm, "TSM", 0, datas_tsm)
+```
+
+```{r}
+# 9.4.2 - EML (EXTREME LEARNING MACHINE) - TSM
+metodo_eml(tsm, "TSM", 1, datas_tsm)
+```
+
+```{r}
+# 9.5.1 - EML (EXTREME LEARNING MACHINE) - BTC
+metodo_eml(btc, "BTC-USD", 0, datas_btc)
+```
+
+```{r}
+# 9.5.2 - EML (EXTREME LEARNING MACHINE) - BTC
+metodo_eml(btc, "BTC-USD", 1, datas_btc)
+```
+
+```{r}
+# 9.6.1 - EML (EXTREME LEARNING MACHINE) - XMR
+metodo_eml(xmr, "XMR-USD", 0, datas_xmr)
+```
+
+```{r}
+# 9.6.2 - EML (EXTREME LEARNING MACHINE) - XMR
+metodo_eml(xmr, "XMR-USD", 1, datas_xmr)
+```
+
+```{r}
+# 9.7.1 - EML (EXTREME LEARNING MACHINE) - ETH
+metodo_eml(eth, "ETH-USD", 0, datas_eth)
+```
+
+```{r}
+# 9.7.2 - EML (EXTREME LEARNING MACHINE) - ETH
+metodo_eml(eth, "ETH-USD", 1, datas_eth)
+```
